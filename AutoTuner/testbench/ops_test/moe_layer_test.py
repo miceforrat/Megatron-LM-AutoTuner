@@ -4,7 +4,7 @@ import torch
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_spec,
 )
-from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.transformer.attention import SelfAttention
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -52,8 +52,9 @@ class TestMoELayer(TestWithHiddenInputs):
         self.self_attention = SelfAttention(
             tf_config,
             get_gpt_layer_with_transformer_engine_spec(
-                                multi_latent_attention = tf_config.multi_latent_attention,
-                                qk_layernorm=tf_config.qk_layernorm).submodules.self_attention.submodules,
+                multi_latent_attention=tf_config.multi_latent_attention,
+                qk_layernorm=tf_config.qk_layernorm,
+            ).submodules.self_attention.submodules,
             layer_number=layer_number,
             attn_mask_type=AttnMaskType.causal,
         )
@@ -63,7 +64,7 @@ class TestMoELayer(TestWithHiddenInputs):
                 with MemoryTrackerContext(self.module_name) as memory_tracker_ctx:
                     self.op = MoELayerForTest(
                         tf_config,
-                        pg_collection=ProcessGroupCollection.use_mpu_process_groups(),
+                        model_comm_pgs=ModelCommProcessGroups.use_mpu_process_groups(),
                         hook_activation=False,
                     )
 
@@ -83,7 +84,7 @@ class TestMoELayer(TestWithHiddenInputs):
             else:
                 self.op = MoELayerForTest(
                     tf_config,
-                    pg_collection=ProcessGroupCollection.use_mpu_process_groups(),
+                    model_comm_pgs=ModelCommProcessGroups.use_mpu_process_groups(),
                     hook_activation=False,
                 )
 

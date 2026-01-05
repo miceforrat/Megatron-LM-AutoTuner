@@ -6,7 +6,7 @@ from megatron.core import parallel_state
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_spec,
 )
-from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.transformer.transformer_config import TransformerConfig
 from transformers import PretrainedConfig
 from typing_extensions import override
@@ -59,11 +59,11 @@ class TestTransformerLayer(TestWithHiddenInputs):
                     layer_submodules = tf_config.layer_submodules
                 else:
                     spec = get_gpt_layer_with_transformer_engine_spec(
-                                num_experts=tf_config.num_moe_experts,
-                                multi_latent_attention = tf_config.multi_latent_attention,
-                                qk_layernorm=tf_config.qk_layernorm,
-                                moe_grouped_gemm=tf_config.moe_grouped_gemm
-                            )
+                        num_experts=tf_config.num_moe_experts,
+                        multi_latent_attention=tf_config.multi_latent_attention,
+                        qk_layernorm=tf_config.qk_layernorm,
+                        moe_grouped_gemm=tf_config.moe_grouped_gemm,
+                    )
                     layer_submodules = spec.submodules
 
                 self.op = TransformerLayerForTest(
@@ -75,7 +75,7 @@ class TestTransformerLayer(TestWithHiddenInputs):
                         if tf_config.hidden_dropout is not None
                         else 0.1
                     ),
-                    pg_collection=ProcessGroupCollection.use_mpu_process_groups(),
+                    model_comm_pgs=ModelCommProcessGroups.use_mpu_process_groups(),
                     vp_stage=parallel_state.get_virtual_pipeline_model_parallel_rank(),
                     hook_activation=(profile_mode == ProfileMode.collect_data),
                 )
@@ -91,11 +91,11 @@ class TestTransformerLayer(TestWithHiddenInputs):
                 layer_submodules = tf_config.layer_submodules
             else:
                 spec = get_gpt_layer_with_transformer_engine_spec(
-                            num_experts=tf_config.num_moe_experts,
-                            multi_latent_attention = tf_config.multi_latent_attention,
-                            qk_layernorm=tf_config.qk_layernorm,
-                            moe_grouped_gemm=tf_config.moe_grouped_gemm
-                        )
+                    num_experts=tf_config.num_moe_experts,
+                    multi_latent_attention=tf_config.multi_latent_attention,
+                    qk_layernorm=tf_config.qk_layernorm,
+                    moe_grouped_gemm=tf_config.moe_grouped_gemm,
+                )
                 layer_submodules = spec.submodules
             self.op = TransformerLayerForTest(
                 tf_config,
@@ -106,7 +106,7 @@ class TestTransformerLayer(TestWithHiddenInputs):
                     if tf_config.hidden_dropout is not None
                     else 0.1
                 ),
-                pg_collection=ProcessGroupCollection.use_mpu_process_groups(),
+                model_comm_pgs=ModelCommProcessGroups.use_mpu_process_groups(),
                 vp_stage=parallel_state.get_virtual_pipeline_model_parallel_rank(),
                 hook_activation=(profile_mode == ProfileMode.collect_data),
             )

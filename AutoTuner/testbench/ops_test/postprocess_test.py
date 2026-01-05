@@ -1,7 +1,6 @@
 import os
 from typing import Any, Dict, Literal, Optional
 
-from AutoTuner.testbench.ops_test.test_with_hiddens import TestWithHiddenInputs
 import torch
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.models.common.embeddings.language_model_embedding import (
@@ -13,7 +12,7 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_spec,
     get_gpt_mtp_block_spec,
 )
-from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.transformer.multi_token_prediction import (
     MTPLossAutoScaler,
     MTPLossLoggingHelper,
@@ -28,6 +27,7 @@ from tensordict import TensorDict
 from transformers import PretrainedConfig
 from typing_extensions import override
 
+from AutoTuner.testbench.ops_test.test_with_hiddens import TestWithHiddenInputs
 from AutoTuner.utils.hidden_status_gen import HiddenStatusGenerator
 from AutoTuner.utils.memory import MemoryTrackerContext, get_memory_str
 from AutoTuner.utils.model_inputs import get_thd_model_input_from_bshd
@@ -77,7 +77,7 @@ class TestPostprocess(TestWithHiddenInputs):
         self.post_process = parallel_state.is_pipeline_last_stage()
         self.parallel_output = parallel_output
         self.pre_process = tf_config.mtp_num_layers is not None
-        self.pg_collection = ProcessGroupCollection.use_mpu_process_groups()
+        self.model_comm_pgs = ModelCommProcessGroups.use_mpu_process_groups()
         self.cp_group = parallel_state.get_context_parallel_group()
         self.tp_group = (
             tp_group
@@ -94,9 +94,9 @@ class TestPostprocess(TestWithHiddenInputs):
             )
             transformer_layer_spec = get_gpt_layer_with_transformer_engine_spec(
                 num_experts=tf_config.num_moe_experts,
-                multi_latent_attention = tf_config.multi_latent_attention,
+                multi_latent_attention=tf_config.multi_latent_attention,
                 qk_layernorm=tf_config.qk_layernorm,
-                moe_grouped_gemm=tf_config.moe_grouped_gemm
+                moe_grouped_gemm=tf_config.moe_grouped_gemm,
             )
 
             transformer_layer_spec_for_mtp = transformer_layer_spec
@@ -141,7 +141,7 @@ class TestPostprocess(TestWithHiddenInputs):
                         tp_group=parallel_state.get_tensor_model_parallel_group(),
                     ),
                     cp_group=self.cp_group,
-                    pg_collection=self.pg_collection,
+                    model_comm_pgs=self.model_comm_pgs,
                     embedding=LanguageModelEmbedding(
                         config=tf_config,
                         vocab_size=hf_config.vocab_size,
@@ -249,7 +249,7 @@ class TestPostprocess(TestWithHiddenInputs):
                     tp_group=parallel_state.get_tensor_model_parallel_group(),
                 ),
                 cp_group=self.cp_group,
-                pg_collection=self.pg_collection,
+                model_comm_pgs=self.model_comm_pgs,
                 embedding=LanguageModelEmbedding(
                     config=self.tf_config,
                     vocab_size=self.hf_config.vocab_size,
@@ -264,7 +264,7 @@ class TestPostprocess(TestWithHiddenInputs):
 
     @override
     def prepare_input(self, test_case: InputTestCase, micro_batch: TensorDict):
-        
+
         hiddenstatus = self.hiddenstatus_generator.prepare_input(test_case, micro_batch)
         hidden_states = hiddenstatus[0]
         attention_mask = hiddenstatus[1]
@@ -273,11 +273,11 @@ class TestPostprocess(TestWithHiddenInputs):
         micro_batch = micro_batch.to(torch.cuda.current_device())
         micro_batch = micro_batch.contiguous()
         mtp_in_postprocess = self.mtp_process
-        
+
         if test_case.shape == "bshd":
             input_ids = micro_batch["input_ids"]
             position_ids = micro_batch["position_ids"]
-                
+
             return (
                 mtp_in_postprocess,
                 input_ids,
@@ -288,9 +288,12 @@ class TestPostprocess(TestWithHiddenInputs):
                 packed_seq_params,
             )
         else:
-            input_ids_rmpad, attention_mask_rmpad, position_ids_rmpad, packed_seq_params_rmpad = (
-                get_thd_model_input_from_bshd(micro_batch)
-            )
+            (
+                input_ids_rmpad,
+                attention_mask_rmpad,
+                position_ids_rmpad,
+                packed_seq_params_rmpad,
+            ) = get_thd_model_input_from_bshd(micro_batch)
             return (
                 mtp_in_postprocess,
                 input_ids_rmpad,
@@ -300,7 +303,6 @@ class TestPostprocess(TestWithHiddenInputs):
                 rotary_pos_emb,
                 packed_seq_params,
             )
-
 
     @override
     def calculate_tokens(

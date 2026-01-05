@@ -7,7 +7,7 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_spec,
 )
 from megatron.core.packed_seq_params import PackedSeqParams
-from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.transformer.attention import SelfAttention
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -38,7 +38,7 @@ class TestAttnFuncWithCPAndKVP2P(TestWithHiddenInputs):
         theoretical_activations: bool = False,
         tp_comm_overlap_cfg: str = None,
         #
-        pg_collection=None,
+        model_comm_pgs=None,
     ):
         super().__init__(
             hf_config=hf_config,
@@ -52,9 +52,9 @@ class TestAttnFuncWithCPAndKVP2P(TestWithHiddenInputs):
             tp_comm_overlap_cfg=tp_comm_overlap_cfg,
         )
         # Initialize process group collection
-        if pg_collection is None:
-            pg_collection = ProcessGroupCollection.use_mpu_process_groups()
-        self.pg_collection = pg_collection
+        if model_comm_pgs is None:
+            model_comm_pgs = ModelCommProcessGroups.use_mpu_process_groups()
+        self.model_comm_pgs = model_comm_pgs
         self.kept_packed_seq_params = set(
             field.name for field in dataclasses.fields(PackedSeqParams)
         )
@@ -62,8 +62,10 @@ class TestAttnFuncWithCPAndKVP2P(TestWithHiddenInputs):
 
         self.self_attention = SelfAttention(
             tf_config,
-            get_gpt_layer_with_transformer_engine_spec(multi_latent_attention = tf_config.multi_latent_attention,
-                                qk_layernorm=tf_config.qk_layernorm).submodules.self_attention.submodules,
+            get_gpt_layer_with_transformer_engine_spec(
+                multi_latent_attention=tf_config.multi_latent_attention,
+                qk_layernorm=tf_config.qk_layernorm,
+            ).submodules.self_attention.submodules,
             layer_number=1,
             attn_mask_type=AttnMaskType.causal,
         )
@@ -74,8 +76,8 @@ class TestAttnFuncWithCPAndKVP2P(TestWithHiddenInputs):
             ) as memory_tracker_ctx:
                 self.op = AttnFuncWithCPAndKVP2PForTest(
                     tf_config,
-                    hook_activation = (profile_mode == ProfileMode.collect_data)
-                    )
+                    hook_activation=(profile_mode == ProfileMode.collect_data),
+                )
 
             detailed_mem_report = memory_tracker_ctx.get_result()
 
@@ -89,9 +91,8 @@ class TestAttnFuncWithCPAndKVP2P(TestWithHiddenInputs):
 
         else:
             self.op = AttnFuncWithCPAndKVP2PForTest(
-                tf_config,
-                hook_activation = (profile_mode == ProfileMode.collect_data)
-                )
+                tf_config, hook_activation=(profile_mode == ProfileMode.collect_data)
+            )
 
     @override
     def calc_theoretical_flops(self, test_case: InputTestCase) -> Dict[str, float]:
@@ -194,9 +195,9 @@ class TestAttnFuncWithCPAndKVP2P(TestWithHiddenInputs):
         # Get CP related args
         if self.tf_config.context_parallel_size > 1:
             cp_stream = torch.cuda.Stream()
-            extra_kwargs["cp_group"] = self.pg_collection.cp
+            extra_kwargs["cp_group"] = self.model_comm_pgs.cp
             extra_kwargs["cp_global_ranks"] = torch.distributed.get_process_group_ranks(
-                self.pg_collection.cp
+                self.model_comm_pgs.cp
             )
             extra_kwargs["cp_stream"] = cp_stream
             extra_kwargs["cp_comm_type"] = "p2p"

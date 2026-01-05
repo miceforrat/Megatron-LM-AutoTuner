@@ -1,15 +1,15 @@
 import logging
 from typing import Optional, Union
 
-from megatron.core.inference.contexts.base_context import BaseInferenceContext
 import torch
 from megatron.core import parallel_state, tensor_parallel
 from megatron.core.fusions.fused_cross_entropy import fused_vocab_parallel_cross_entropy
+from megatron.core.inference.contexts.base_context import BaseInferenceContext
 from megatron.core.models.common.embeddings.language_model_embedding import (
     LanguageModelEmbedding,
 )
 from megatron.core.packed_seq_params import PackedSeqParams
-from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.transformer.multi_token_prediction import (
     MTPLossAutoScaler,
     MTPLossLoggingHelper,
@@ -44,7 +44,7 @@ class PostprocessForTest(torch.nn.Module, CommonOpsForTest):
         mtp_process: bool = False,
         output_layer: Optional[tensor_parallel.ColumnParallelLinear] = None,
         cp_group: Optional[torch.distributed.ProcessGroup] = None,
-        pg_collection: Optional[ProcessGroupCollection] = None,
+        model_comm_pgs: Optional[ModelCommProcessGroups] = None,
         embedding: LanguageModelEmbedding = None,
         hook_activation: bool = False,
     ):
@@ -65,9 +65,9 @@ class PostprocessForTest(torch.nn.Module, CommonOpsForTest):
         )
         self.output_layer = output_layer
         self.cp_group = cp_group
-        self.pg_collection = pg_collection
+        self.model_comm_pgs = model_comm_pgs
         self.embedding = embedding
-        
+
     def shared_embedding_or_output_weight(self) -> Tensor:
         """Gets the embedding weight or output logit weights when share input embedding and
         output weights set to True or when use Multi-Token Prediction (MTP) feature.
@@ -82,7 +82,7 @@ class PostprocessForTest(torch.nn.Module, CommonOpsForTest):
             # In this case, if share_embeddings_and_output_weights is True, the shared weights
             # will be stored in embedding layer, and output layer will not have any weight.
             assert hasattr(
-                self, 'embedding'
+                self, "embedding"
             ), f"embedding is needed in this pipeline stage, but it is not initialized."
             return self.embedding.word_embeddings.weight
         elif self.post_process:

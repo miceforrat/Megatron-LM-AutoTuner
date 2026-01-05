@@ -2,13 +2,13 @@ import logging
 from contextlib import nullcontext
 from typing import Optional, Union
 
-from megatron.core.transformer.identity_op import IdentityOp
 import torch
 from megatron.core import tensor_parallel
 from megatron.core.inference.contexts.base_context import BaseInferenceContext
 from megatron.core.packed_seq_params import PackedSeqParams
-from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.process_groups_config import ModelCommProcessGroups
 from megatron.core.transformer import TransformerLayerSubmodules
+from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.utils import (
@@ -30,7 +30,7 @@ class TransformerLayerForTest(CommonOpsForTest, TransformerLayer):
         submodules: TransformerLayerSubmodules,
         layer_number: int = 1,
         hidden_dropout: Optional[float] = None,
-        pg_collection: Optional[ProcessGroupCollection] = None,
+        model_comm_pgs: Optional[ModelCommProcessGroups] = None,
         vp_stage: Optional[int] = None,
         hook_activation: bool = False,
     ):
@@ -40,7 +40,7 @@ class TransformerLayerForTest(CommonOpsForTest, TransformerLayer):
             submodules=submodules,
             layer_number=layer_number,
             hidden_dropout=hidden_dropout,
-            pg_collection=pg_collection,
+            model_comm_pgs=model_comm_pgs,
             vp_stage=vp_stage,
         )
         CommonOpsForTest.__init__(
@@ -76,18 +76,17 @@ class TransformerLayerForTest(CommonOpsForTest, TransformerLayer):
             rotary_pos_emb=rotary_pos_emb,
             rotary_pos_cos=None,
             rotary_pos_sin=None,
-            rotary_pos_cos_sin=None,
             attention_bias=None,
             packed_seq_params=packed_seq_params,
         )
         nvtx_range_pop(suffix="Attention Layer")
-        
+
         nvtx_range_push(suffix="Mlp Layer")
         output = self._forward_mlp(hidden_states)
         nvtx_range_pop(suffix="Mlp Layer")
 
         return output
-    
+
     def forward(
         self,
         hidden_states: Union[Tensor, WrappedTensor],
