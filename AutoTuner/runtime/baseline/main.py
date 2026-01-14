@@ -1,3 +1,5 @@
+from AutoTuner.runtime.baseline.local_trainer import LocalTrainer
+from verl.trainer.ppo.utils import Role
 from .runtime_worker import ActorSimpleRuntimeWorker
 from ..commons import get_batch_data_generator,create_train_dataloader, create_rl_dataset
 import hydra
@@ -14,7 +16,6 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from verl.utils.import_utils import load_extern_object
 from verl.experimental.dataset.sampler import AbstractSampler
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
-
 
 def run(config):
     validate_config(config=config, use_reference_policy=False, use_critic=False)
@@ -83,7 +84,45 @@ def run(config):
     # )
     
     print("---------------------created train dataloader---------------------")
+    
+    # resource_pool_manager = init_resource_pool_mgr(config)
+    # trainer = LocalTrainer(
+    #     config=config,
+    #     actor=actor,
+    #     train_dataloader=train_dataloader,
+    #     resource_pool_manager=resource_pool_manager,
+    # )
+    
+    # trainer.fit()
 
+def init_resource_pool_mgr(config):
+        """Initialize resource pool manager."""
+        mapping = {}
+        global_pool_id = "global_pool"
+        resource_pool_spec = {
+            global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+        }
+        # TODO Here you can use the new registration method to support dynamic registration of roles
+        if config.reward_model.enable_resource_pool:
+            if config.reward_model.n_gpus_per_node <= 0:
+                raise ValueError("config.reward_model.n_gpus_per_node must be greater than 0")
+            if config.reward_model.nnodes <= 0:
+                raise ValueError("config.reward_model.nnodes must be greater than 0")
+
+            reward_pool = [config.reward_model.n_gpus_per_node] * config.reward_model.nnodes
+            resource_pool_spec["reward_pool"] = reward_pool
+
+        from verl.trainer.ppo.ray_trainer import ResourcePoolManager
+
+        if config.algorithm.use_kl_in_reward or config.actor_rollout_ref.actor.use_kl_loss:
+            role = Role.ActorRolloutRef
+        else:
+            role = Role.ActorRollout
+        mapping[role] = "global_pool"
+        
+        mapping[Role.ActorRollout] = "global_pool"
+        resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
+        return resource_pool_manager
 
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(config):

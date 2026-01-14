@@ -48,10 +48,10 @@ micro_batch_size_per_gpu: null
 max_length: null
 
 # Whether to dynamically adjust batch size at runtime
-use_dynamic_bsz: ${critic.use_dynamic_bsz}
+use_dynamic_bsz: False
 
 # Maximum number of tokens per GPU in one forward pass
-forward_max_token_len_per_gpu: ${critic.forward_max_token_len_per_gpu}
+forward_max_token_len_per_gpu: 32768
 
 # Deprecated. Use `reward_manager.name` instead. See `verl/trainer/config/reward_manager.yaml` for details.
 # Kept for backward compatibility.

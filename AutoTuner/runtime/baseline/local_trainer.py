@@ -16,9 +16,77 @@ from verl.trainer.ppo.metric_utils import (
     compute_throughout_metrics,
     compute_timing_metrics,
 )
+import megatron.core.parallel_state as mpu
+
+# import importlib
+
+# _metric_utils = importlib.import_module("verl.trainer.ppo.metric_utils")
+# _orig_compute_data_metrics = _metric_utils.compute_data_metrics
+
+# def _patched_compute_data_metrics(batch, valid_adv: bool = True):
+
+#     # Simplified actor-only metrics for local trainer: keep prompt/response lengths and aborted ratio.
+#     try:
+#         response_info = _compute_response_info(batch)
+#         prompt_length = response_info["prompt_length"]
+#         response_length = response_info["response_length"]
+#     except Exception:
+#         # If batch format differs, return empty metrics
+#         return {}
+
+#     # compute basic stats (safely handle empty tensors)
+#     def safe_stat(tensor, fn, default=0.0):
+#         try:
+#             if tensor.numel() == 0:
+#                 return float(default)
+#             return float(fn(tensor).detach().item())
+#         except Exception:
+#             return float(default)
+
+#     aborted_mask = (response_length == 0)
+#     aborted_ratio = safe_stat(aborted_mask.float(), torch.mean, 0.0)
+
+#     non_aborted_mask = ~aborted_mask
+#     non_aborted_response_length = response_length[non_aborted_mask]
+
+#     non_aborted_mean = safe_stat(non_aborted_response_length, torch.mean, 0.0)
+#     non_aborted_max = safe_stat(non_aborted_response_length, torch.max, 0.0)
+#     non_aborted_min = safe_stat(non_aborted_response_length, torch.min, 0.0)
+
+#     metrics = {
+#         "response_length/mean": safe_stat(response_length, torch.mean, 0.0),
+#         "response_length/max": safe_stat(response_length, torch.max, 0.0),
+#         "response_length/min": safe_stat(response_length, torch.min, 0.0),
+#         "response_length_non_aborted/mean": non_aborted_mean,
+#         "response_length_non_aborted/max": non_aborted_max,
+#         "response_length_non_aborted/min": non_aborted_min,
+#         "response/aborted_ratio": aborted_ratio,
+#         "prompt_length/mean": safe_stat(prompt_length, torch.mean, 0.0),
+#         "prompt_length/max": safe_stat(prompt_length, torch.max, 0.0),
+#         "prompt_length/min": safe_stat(prompt_length, torch.min, 0.0),
+#     }
+
+#     # multi-turn conversation
+#     if "__num_turns__" in batch.non_tensor_batch:
+#         num_turns = batch.non_tensor_batch["__num_turns__"]
+#         metrics["num_turns/min"] = num_turns.min()
+#         metrics["num_turns/max"] = num_turns.max()
+#         metrics["num_turns/mean"] = num_turns.mean()
+
+#     if "tool_call_counts" in batch.non_tensor_batch:
+#         tool_call_counts = batch.non_tensor_batch["tool_call_counts"]
+#         metrics["tool_call_counts/min"] = tool_call_counts.min()
+#         metrics["tool_call_counts/max"] = tool_call_counts.max()
+#         metrics["tool_call_counts/mean"] = tool_call_counts.mean()
+
+#     return metrics
+
+# # apply monkey patch both in the imported module and local name
+# _metric_utils.compute_data_metrics = _patched_compute_data_metrics
+# compute_data_metrics = _patched_compute_data_metrics
 
 class LocalTrainer:
-    def __init__(self, config, actor, train_dataloader):
+    def __init__(self, config, actor, train_dataloader, resource_pool_manager):
         """
         Docstring for __init__
         
@@ -35,6 +103,7 @@ class LocalTrainer:
         self.actor = actor
         self.config = config
         self.train_dataloader = train_dataloader
+        self.resource_pool_manager = resource_pool_manager
         
         # patch some functions as tool functions if we do not need to change it
         self._get_gen_batch = RayPPOTrainer._get_gen_batch
@@ -72,6 +141,13 @@ class LocalTrainer:
         actor_output = DataProto.from_single_dict(data={}, meta_info={"metrics": actor_output})
         return actor_output
 
+    def _get_dp_size(self) -> int:
+        """
+        Returns:
+            The data parallel size (number of DP ranks).
+        """
+        return mpu.get_data_parallel_world_size()
+
     def _balance_batch(self, batch: DataProto, metrics, logging_prefix="global_seqlen", keep_minibatch=False):
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
         attention_mask = batch.batch["attention_mask"]
@@ -83,7 +159,7 @@ class LocalTrainer:
         
         # TODO: we may have to check and FIX this function
         # since we don't use working group, we have to find a way to fix it locally
-        dp_size = self._get_dp_size(self.actor_rollout_wg, "actor")
+        dp_size = self._get_dp_size()
         if keep_minibatch:
             # Decouple the DP balancing and mini-batching.
             minibatch_size = self.config.actor_rollout_ref.actor.get("ppo_mini_batch_size")
@@ -122,7 +198,6 @@ class LocalTrainer:
         from omegaconf import OmegaConf
 
         from verl.utils.tracking import Tracking
-
         logger = Tracking(
             project_name=self.config.trainer.project_name,
             experiment_name=self.config.trainer.experiment_name,
@@ -152,6 +227,13 @@ class LocalTrainer:
         #     rollout_skip.wrap_generate_sequences()
 
         # add tqdm
+        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+
+        if self.config.trainer.total_training_steps is not None:
+            total_training_steps = self.config.trainer.total_training_steps
+
+        self.total_training_steps = total_training_steps
+        
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
         # we start from step 1
