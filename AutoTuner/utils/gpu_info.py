@@ -72,5 +72,32 @@ def get_gpu_peak_flops() -> float:
         print(f"Error detecting GPU: {e}. Using default PEAK_FLOPS.")
         return GPU_SPECS_DATABASE["DEFAULT"] * 1e12
 
+def resolve_n_gpus() -> int:
+    # 1) torch.distributed 已初始化：用 world_size（最符合“并行进程数”语义）
+    try:
+        import torch.distributed as dist
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_world_size()
+    except Exception:
+        pass
+
+    # 2) 本机 CUDA 可见设备数：受 CUDA_VISIBLE_DEVICES 影响（最符合“你能用几张卡”）
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.device_count()
+    except Exception:
+        pass
+
+    # 3) 仅从环境变量推断（不依赖 torch）
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if cvd:
+        # 处理 "0,1,2" / "0" / "" 之类
+        ids = [x.strip() for x in cvd.split(",") if x.strip() != ""]
+        if len(ids) > 0:
+            return len(ids)
+
+    return 1
+
 
 GPU_PEAK_FLOPS = get_gpu_peak_flops()

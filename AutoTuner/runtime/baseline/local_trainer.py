@@ -17,76 +17,10 @@ from verl.trainer.ppo.metric_utils import (
     compute_timing_metrics,
 )
 import megatron.core.parallel_state as mpu
-
-# import importlib
-
-# _metric_utils = importlib.import_module("verl.trainer.ppo.metric_utils")
-# _orig_compute_data_metrics = _metric_utils.compute_data_metrics
-
-# def _patched_compute_data_metrics(batch, valid_adv: bool = True):
-
-#     # Simplified actor-only metrics for local trainer: keep prompt/response lengths and aborted ratio.
-#     try:
-#         response_info = _compute_response_info(batch)
-#         prompt_length = response_info["prompt_length"]
-#         response_length = response_info["response_length"]
-#     except Exception:
-#         # If batch format differs, return empty metrics
-#         return {}
-
-#     # compute basic stats (safely handle empty tensors)
-#     def safe_stat(tensor, fn, default=0.0):
-#         try:
-#             if tensor.numel() == 0:
-#                 return float(default)
-#             return float(fn(tensor).detach().item())
-#         except Exception:
-#             return float(default)
-
-#     aborted_mask = (response_length == 0)
-#     aborted_ratio = safe_stat(aborted_mask.float(), torch.mean, 0.0)
-
-#     non_aborted_mask = ~aborted_mask
-#     non_aborted_response_length = response_length[non_aborted_mask]
-
-#     non_aborted_mean = safe_stat(non_aborted_response_length, torch.mean, 0.0)
-#     non_aborted_max = safe_stat(non_aborted_response_length, torch.max, 0.0)
-#     non_aborted_min = safe_stat(non_aborted_response_length, torch.min, 0.0)
-
-#     metrics = {
-#         "response_length/mean": safe_stat(response_length, torch.mean, 0.0),
-#         "response_length/max": safe_stat(response_length, torch.max, 0.0),
-#         "response_length/min": safe_stat(response_length, torch.min, 0.0),
-#         "response_length_non_aborted/mean": non_aborted_mean,
-#         "response_length_non_aborted/max": non_aborted_max,
-#         "response_length_non_aborted/min": non_aborted_min,
-#         "response/aborted_ratio": aborted_ratio,
-#         "prompt_length/mean": safe_stat(prompt_length, torch.mean, 0.0),
-#         "prompt_length/max": safe_stat(prompt_length, torch.max, 0.0),
-#         "prompt_length/min": safe_stat(prompt_length, torch.min, 0.0),
-#     }
-
-#     # multi-turn conversation
-#     if "__num_turns__" in batch.non_tensor_batch:
-#         num_turns = batch.non_tensor_batch["__num_turns__"]
-#         metrics["num_turns/min"] = num_turns.min()
-#         metrics["num_turns/max"] = num_turns.max()
-#         metrics["num_turns/mean"] = num_turns.mean()
-
-#     if "tool_call_counts" in batch.non_tensor_batch:
-#         tool_call_counts = batch.non_tensor_batch["tool_call_counts"]
-#         metrics["tool_call_counts/min"] = tool_call_counts.min()
-#         metrics["tool_call_counts/max"] = tool_call_counts.max()
-#         metrics["tool_call_counts/mean"] = tool_call_counts.mean()
-
-#     return metrics
-
-# # apply monkey patch both in the imported module and local name
-# _metric_utils.compute_data_metrics = _patched_compute_data_metrics
-# compute_data_metrics = _patched_compute_data_metrics
+from AutoTuner.utils.gpu_info import resolve_n_gpus
 
 class LocalTrainer:
-    def __init__(self, config, actor, train_dataloader, resource_pool_manager):
+    def __init__(self, config, actor, train_dataloader):
         """
         Docstring for __init__
         
@@ -103,7 +37,6 @@ class LocalTrainer:
         self.actor = actor
         self.config = config
         self.train_dataloader = train_dataloader
-        self.resource_pool_manager = resource_pool_manager
         
         # patch some functions as tool functions if we do not need to change it
         self._get_gen_batch = RayPPOTrainer._get_gen_batch
@@ -546,11 +479,11 @@ class LocalTrainer:
                 # collect metrics
                 # TODO: we may have to check and fully make use of this, so I did not remove this
                 # but, for compute_data_metrics, we may have to check it for there might be some problems
-                metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+                # metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 
                 # real TODO: fix this "get_n_gpus"
-                n_gpus = self.resource_pool_manager.get_n_gpus()
+                n_gpus = resolve_n_gpus()
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
                 # Note: mismatch metrics (KL, PPL, etc.) are collected at line 1179 after advantage computation
 

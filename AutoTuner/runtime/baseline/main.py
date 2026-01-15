@@ -86,14 +86,13 @@ def run(config):
     print("---------------------created train dataloader---------------------")
     
     # resource_pool_manager = init_resource_pool_mgr(config)
-    # trainer = LocalTrainer(
-    #     config=config,
-    #     actor=actor,
-    #     train_dataloader=train_dataloader,
-    #     resource_pool_manager=resource_pool_manager,
-    # )
+    trainer = LocalTrainer(
+        config=config,
+        actor=actor,
+        train_dataloader=train_dataloader,
+    )
     
-    # trainer.fit()
+    trainer.fit()
 
 def init_resource_pool_mgr(config):
         """Initialize resource pool manager."""
